@@ -24,6 +24,8 @@ const bot = new TelegramBot(constants.TOKEN, { polling: true });
 var websocketOpened = false;
 var statusInterval: NodeJS.Timeout;
 var dlManager = dlm.DlManager.getInstance();
+const Heroku = require('heroku-client')
+const heroku = new Heroku({ token: process.env.HEROKU_API_KEY })
 
 initAria2();
 
@@ -211,6 +213,28 @@ setEventCallback(eventRegex.commandsRegex.unzipMirror, eventRegex.commandsRegexN
   }
 });
 
+setEventCallback(eventRegex.commandsRegex.restart, eventRegex.commandsRegexNoName.restart, async (msg, match) => {
+  if (msgTools.isAuthorized(msg) !== 0) {
+    msgTools.sendMessage(bot, msg, `This command is only for SUDO_USERS`);
+  } else {
+    try {
+      if (!process.env.HEROKU_API_KEY) {
+        msgTools.sendMessage(bot, msg, `Can't restart as <code>HEROKU_API_KEY</code> is not provided`);
+      } else {
+        let restartingMsg = await bot.sendMessage(msg.chat.id, `Heroku dyno will be restarted now.`, {
+          reply_to_message_id: msg.message_id,
+          parse_mode: 'HTML'
+        });
+        await writeFile('./restartObj.json', JSON.stringify({ originalMsg: msg, restartingMsg }));
+        const response = await heroku.delete(`/apps/${process.env.HEROKU_APP_NAME}/dynos`);
+      }
+    } catch (error) {
+      console.log("Error while restart: ", error.message);
+      msgTools.sendMessage(bot, msg, error.message, 60000);
+    }
+  }
+});
+
 /**
  * Start a new download operation. Make sure that this is triggered by an
  * authorized user, because this function itself does not check for that.
@@ -311,13 +335,18 @@ setEventCallback(eventRegex.commandsRegex.cancelMirror, eventRegex.commandsRegex
     if (authorizedCode > -1 && authorizedCode < 3) {
       cancelMirror(dlDetails, msg);
     } else if (authorizedCode === 3) {
-      msgTools.isAdmin(bot, msg, (e, res) => {
-        if (res) {
-          cancelMirror(dlDetails, msg);
-        } else {
-          msgTools.sendMessage(bot, msg, 'You do not have permission to do that.');
-        }
-      });
+      if (msg.from.id === dlDetails.tgFromId) {
+        cancelMirror(dlDetails, msg);
+      } else {
+        msgTools.isAdmin(bot, msg, (e, res) => {
+          console.log('Cta admins-->', res);
+          if (res) {
+            cancelMirror(dlDetails, msg);
+          } else {
+            msgTools.sendMessage(bot, msg, 'You do not have permission to do that.');
+          }
+        });
+      }
     } else {
       msgTools.sendUnauthorizedMessage(bot, msg);
     }
